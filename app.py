@@ -1,5 +1,6 @@
 import io
 import zipfile
+import datetime
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -9,14 +10,14 @@ import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v1.6 🍶)
+# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v1.7 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
-st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v1.6 - Robust Error Guard)")
+st.title("🍶 MADE BY 대성 ")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v1.7 - Smart Filename with Date)")
 st.markdown("---")
 
 # VIP 정상 8자리 특수코드 명부
@@ -30,18 +31,14 @@ ALLOWED_8DIGIT_CODES = [
 
 # 제품코드 초강력 세척 함수 (에러 완벽 방어)
 def clean_product_code(series):
-    # 빈 값(NaN) 채우고 문자열 변환 및 공백 제거
     s = series.fillna("").astype(str).str.strip()
-    # 실수형 표현(.0) 제거
     s = s.str.replace(r'\.0$', '', regex=True)
     
     def remove_fake_zero(val):
-        # 만약 값이 비어있거나 실수형태로 들어와도 안전하게 문자열로 변환
         val_str = str(val).strip()
         if val_str == "" or val_str.lower() == "nan":
             return ""
             
-        # 8자리 코드 예외 처리
         if len(val_str) == 8 and val_str not in ALLOWED_8DIGIT_CODES:
             if val_str.endswith('0'): 
                 return val_str[:-1]
@@ -100,23 +97,17 @@ with st.sidebar:
     if st.button("📥 재고 확정", type="primary", disabled=is_disabled):
         if file_seosan and file_yongma:
             try:
-                # 서산창고 로드
                 df_s = pd.read_excel(file_seosan, usecols="B,L", engine='xlrd' if file_seosan.name.endswith('.xls') else None)
                 df_s.columns = ['제품코드', '재고수량']
                 df_s['제품코드'] = clean_product_code(df_s['제품코드'])
                 df_s['재고수량'] = pd.to_numeric(df_s['재고수량'], errors='coerce').fillna(0)
-                
-                # 제품코드가 비어있지 않은 유효한 행만 필터링
                 df_s = df_s[df_s['제품코드'] != ""]
                 st.session_state['stock_seosan'] = df_s.groupby('제품코드')['재고수량'].sum().to_dict()
                 
-                # 용마창고 로드
                 df_y = pd.read_excel(file_yongma, usecols="B,H", engine='xlrd' if file_yongma.name.endswith('.xls') else None)
                 df_y.columns = ['제품코드', '재고수량']
                 df_y['제품코드'] = clean_product_code(df_y['제품코드'])
                 df_y['재고수량'] = pd.to_numeric(df_y['재고수량'], errors='coerce').fillna(0)
-                
-                # 제품코드가 비어있지 않은 유효한 행만 필터링
                 df_y = df_y[df_y['제품코드'] != ""]
                 st.session_state['stock_yongma'] = df_y.groupby('제품코드')['재고수량'].sum().to_dict()
                 
@@ -161,7 +152,6 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             orig_columns = orders_df.columns.tolist()
             qty_col_name = orig_columns[18]
             
-            # 주문번호 인식
             col_A_str = orders_df.iloc[:, 0].astype(str).str.strip()
             col_B_str = orders_df.iloc[:, 1].astype(str).str.strip()
             pattern = r'\d{6}[a-zA-Z]{2}\d{3}'
@@ -170,7 +160,6 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             orders_df['제품코드'] = clean_product_code(orders_df.iloc[:, 9])
             orders_df['수량'] = pd.to_numeric(orders_df.iloc[:, 18], errors='coerce').fillna(0)
             
-            # 사은품 및 빈 코드 제외
             gift_mask = orders_df['주문번호'].astype(str).str.contains('_사은품', na=False)
             orders_df = orders_df[~gift_mask].reset_index(drop=True)
             orders_df = orders_df[orders_df['제품코드'] != ""].reset_index(drop=True)
@@ -178,7 +167,6 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             
             total_stats = get_pack_stats(orders_df)
             
-            # 배정 알고리즘
             temp_s = st.session_state['stock_seosan'].copy()
             temp_y = st.session_state['stock_yongma'].copy()
             results_map = {}
@@ -236,13 +224,11 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
                             
                         results_map[idx] = {'주문번호': oid, '제품코드': it['제품코드'], '수량': it['수량'], '서산배정': 0, '용마배정': 0, '상태': reason_str}
             
-            # 결과 정리
             results_list = [results_map[i] for i in range(len(orders_df))]
             st.session_state['stock_seosan'] = temp_s
             st.session_state['stock_yongma'] = temp_y
             st.session_state['order_count'] += 1
             
-            # 파일 분할 (안전 컬럼 유지)
             list_s, list_y, list_un = [], [], []
             for i, row in enumerate(results_list):
                 orig_row = orders_df.iloc[i].to_dict()
@@ -266,7 +252,6 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
                 '미배정': df_un['주문번호'].nunique() if not df_un.empty else 0
             })
             
-            # ZIP 생성
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for fn, dfd in [("1_서산.xlsx", df_s[orig_columns] if not df_s.empty else df_s), 
@@ -276,14 +261,17 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             
             st.success(f"🎉 {st.session_state['order_count']}차 배정 완료!")
             
-            # 분석 리포트
             st.subheader(f"📊 {st.session_state['order_count']}차 포장 유형 분석")
             rc1, rc2, rc3 = st.columns(3)
             with rc1: st.write("**📑 전체**"); st.write(f"단포: `{total_stats['단포']}` / 단수: `{total_stats['단수합포']}` / 이종: `{total_stats['이종합포']}`")
             with rc2: st.write("**🏢 서산**"); st.write(f"단포: `{s_stats['단포']}` / 단수: `{s_stats['단수합포']}` / 이종: `{s_stats['이종합포']}`")
             with rc3: st.write("**🏢 용마**"); st.write(f"단포: `{y_stats['단포']}` / 단수: `{y_stats['단수합포']}` / 이종: `{y_stats['이종합포']}`")
             
-            st.download_button("💾 완성 패키지 ZIP 다운로드", zip_buffer.getvalue(), f"결과_{st.session_state['order_count']}차.zip", "application/zip", width="stretch")
+            # 💡 [날짜 계산 및 동적 다운로드 파일명 적용]
+            today_str = datetime.datetime.now().strftime("%m%d")  # MMdd 형식 (예: 0716)
+            zip_filename = f"{today_str}_{st.session_state['order_count']}차.zip"
+            
+            st.download_button("💾 통합 다운로드", zip_buffer.getvalue(), zip_filename, "application/zip", width="stretch")
     except Exception as e:
         st.error(f"🚨 배정 중 중단됨: {e}")
 
