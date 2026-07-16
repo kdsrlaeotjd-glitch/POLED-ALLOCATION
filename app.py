@@ -9,14 +9,14 @@ import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v1.5 🍶)
+# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v1.6 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
-st.title("🍶 MADE BY 대성 ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v1.5 - Precision Reason Tracking)")
+st.title("🍶 MADE BY DS ")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v1.6 - Robust Error Guard)")
 st.markdown("---")
 
 # VIP 정상 8자리 특수코드 명부
@@ -28,15 +28,28 @@ ALLOWED_8DIGIT_CODES = [
     '10102102', '10102101'
 ]
 
-# 제품코드 세척 함수
+# 제품코드 초강력 세척 함수 (에러 완벽 방어)
 def clean_product_code(series):
-    s = series.astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+    # 빈 값(NaN) 채우고 문자열 변환 및 공백 제거
+    s = series.fillna("").astype(str).str.strip()
+    # 실수형 표현(.0) 제거
+    s = s.str.replace(r'\.0$', '', regex=True)
+    
     def remove_fake_zero(val):
-        if len(val) == 8 and val not in ALLOWED_8DIGIT_CODES:
-            if val.endswith('0'): return val[:-1]
-        elif len(val) == 6:
-            if val.endswith('0'): return val[:-1]
-        return val
+        # 만약 값이 비어있거나 실수형태로 들어와도 안전하게 문자열로 변환
+        val_str = str(val).strip()
+        if val_str == "" or val_str.lower() == "nan":
+            return ""
+            
+        # 8자리 코드 예외 처리
+        if len(val_str) == 8 and val_str not in ALLOWED_8DIGIT_CODES:
+            if val_str.endswith('0'): 
+                return val_str[:-1]
+        elif len(val_str) == 6:
+            if val_str.endswith('0'): 
+                return val_str[:-1]
+        return val_str
+        
     return s.apply(remove_fake_zero)
 
 # 단포 / 단수합포 / 이종합포 자동 감지 함수
@@ -87,16 +100,24 @@ with st.sidebar:
     if st.button("📥 재고 확정", type="primary", disabled=is_disabled):
         if file_seosan and file_yongma:
             try:
+                # 서산창고 로드
                 df_s = pd.read_excel(file_seosan, usecols="B,L", engine='xlrd' if file_seosan.name.endswith('.xls') else None)
                 df_s.columns = ['제품코드', '재고수량']
                 df_s['제품코드'] = clean_product_code(df_s['제품코드'])
                 df_s['재고수량'] = pd.to_numeric(df_s['재고수량'], errors='coerce').fillna(0)
+                
+                # 제품코드가 비어있지 않은 유효한 행만 필터링
+                df_s = df_s[df_s['제품코드'] != ""]
                 st.session_state['stock_seosan'] = df_s.groupby('제품코드')['재고수량'].sum().to_dict()
                 
+                # 용마창고 로드
                 df_y = pd.read_excel(file_yongma, usecols="B,H", engine='xlrd' if file_yongma.name.endswith('.xls') else None)
                 df_y.columns = ['제품코드', '재고수량']
                 df_y['제품코드'] = clean_product_code(df_y['제품코드'])
                 df_y['재고수량'] = pd.to_numeric(df_y['재고수량'], errors='coerce').fillna(0)
+                
+                # 제품코드가 비어있지 않은 유효한 행만 필터링
+                df_y = df_y[df_y['제품코드'] != ""]
                 st.session_state['stock_yongma'] = df_y.groupby('제품코드')['재고수량'].sum().to_dict()
                 
                 st.session_state['inventory_loaded'] = True
@@ -149,8 +170,10 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             orders_df['제품코드'] = clean_product_code(orders_df.iloc[:, 9])
             orders_df['수량'] = pd.to_numeric(orders_df.iloc[:, 18], errors='coerce').fillna(0)
             
+            # 사은품 및 빈 코드 제외
             gift_mask = orders_df['주문번호'].astype(str).str.contains('_사은품', na=False)
             orders_df = orders_df[~gift_mask].reset_index(drop=True)
+            orders_df = orders_df[orders_df['제품코드'] != ""].reset_index(drop=True)
             orders_df['_orig_idx'] = orders_df.index
             
             total_stats = get_pack_stats(orders_df)
@@ -206,7 +229,6 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
                         total_required = reqs[pc]
                         total_avail = temp_s.get(pc, 0) + temp_y.get(pc, 0)
                         
-                        # 💡 [정밀 로직 업그레이드] 행 본인의 제품이 정말 부족한가? 아니면 다른 제품때문에 억울하게 묶였는가?
                         if total_required > total_avail:
                             reason_str = '실재고부족'
                         else:
