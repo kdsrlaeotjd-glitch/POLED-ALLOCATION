@@ -10,14 +10,14 @@ import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v1.7 🍶)
+# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v1.8 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v1.7 - Smart Filename with Date)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v1.8 - Trailing Zero Precision Fix)")
 st.markdown("---")
 
 # VIP 정상 8자리 특수코드 명부
@@ -29,22 +29,31 @@ ALLOWED_8DIGIT_CODES = [
     '10102102', '10102101'
 ]
 
-# 제품코드 초강력 세척 함수 (에러 완벽 방어)
+# 제품코드 초강력 세척 함수 (🚨 8자리 뒷자리 0 저격 로직 강화)
 def clean_product_code(series):
+    # 1. 먼저 들어온 모든 데이터를 공백 없는 순수 문자열로 강제 통일
     s = series.fillna("").astype(str).str.strip()
-    s = s.str.replace(r'\.0$', '', regex=True)
     
     def remove_fake_zero(val):
         val_str = str(val).strip()
+        
+        # 2. 엑셀 소수점 형태(.0)가 문자열 뒤에 붙어있다면 즉시 강제 제거
+        if val_str.endswith('.0'):
+            val_str = val_str[:-2]
+            
         if val_str == "" or val_str.lower() == "nan":
             return ""
             
+        # 3. [초정밀 필터] 마스터코드가 아닌 '순수 8자리' 코드 중 끝이 0인 경우 저격 세척
         if len(val_str) == 8 and val_str not in ALLOWED_8DIGIT_CODES:
-            if val_str.endswith('0'): 
-                return val_str[:-1]
+            if val_str[-1] == '0':
+                return val_str[:-1]  # 맨 뒤 0 잘라내기 (7자리로 만듦)
+                
+        # 4. 순수 6자리 코드 중 끝이 0인 경우 세척
         elif len(val_str) == 6:
-            if val_str.endswith('0'): 
-                return val_str[:-1]
+            if val_str[-1] == '0':
+                return val_str[:-1]  # 맨 뒤 0 잘라내기 (5자리로 만듦)
+                
         return val_str
         
     return s.apply(remove_fake_zero)
@@ -267,8 +276,7 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             with rc2: st.write("**🏢 서산**"); st.write(f"단포: `{s_stats['단포']}` / 단수: `{s_stats['단수합포']}` / 이종: `{s_stats['이종합포']}`")
             with rc3: st.write("**🏢 용마**"); st.write(f"단포: `{y_stats['단포']}` / 단수: `{y_stats['단수합포']}` / 이종: `{y_stats['이종합포']}`")
             
-            # 💡 [날짜 계산 및 동적 다운로드 파일명 적용]
-            today_str = datetime.datetime.now().strftime("%m%d")  # MMdd 형식 (예: 0716)
+            today_str = datetime.datetime.now().strftime("%m%d")
             zip_filename = f"{today_str}_{st.session_state['order_count']}차.zip"
             
             st.download_button("💾 통합 다운로드", zip_buffer.getvalue(), zip_filename, "application/zip", width="stretch")
