@@ -10,14 +10,14 @@ import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v1.9 🍶)
+# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v2.0 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v1.9 - Smart Inner Filenames)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v2.0 - Total Code Wash & Smart Naming)")
 st.markdown("---")
 
 # VIP 정상 8자리 특수코드 명부
@@ -161,7 +161,12 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             pattern = r'\d{6}[a-zA-Z]{2}\d{3}'
             is_type1 = col_A_str.str.contains(pattern, na=False, regex=True)
             orders_df['주문번호'] = np.where(is_type1, col_A_str, col_B_str)
-            orders_df['제품코드'] = clean_product_code(orders_df.iloc[:, 9])
+            
+            # 💡 [핵심 해결] 원본 상품코드 열(10번째 열) 자체를 세척된 코드로 완벽 덮어쓰기!
+            orig_pcode_col_name = orig_columns[9]
+            orders_df[orig_pcode_col_name] = clean_product_code(orders_df.iloc[:, 9])
+            orders_df['제품코드'] = orders_df[orig_pcode_col_name]
+            
             orders_df['수량'] = pd.to_numeric(orders_df.iloc[:, 18], errors='coerce').fillna(0)
             
             gift_mask = orders_df['주문번호'].astype(str).str.contains('_사은품', na=False)
@@ -256,13 +261,11 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
                 '미배정': df_un['주문번호'].nunique() if not df_un.empty else 0
             })
             
-            # 💡 [파일명 고도화] 날짜 및 차수 추출
             today_str = datetime.datetime.now().strftime("%m%d")
             order_cnt = st.session_state['order_count']
             
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-                # 내부 엑셀 파일명을 사장님 요청 양식(MMDD_N차 창고명.xlsx)으로 동적 인코딩!
                 for fn_label, dfd in [
                     (f"{today_str}_{order_cnt}차 서산.xlsx", df_s[orig_columns] if not df_s.empty else df_s), 
                     (f"{today_str}_{order_cnt}차 용마.xlsx", df_y[orig_columns] if not df_y.empty else df_y), 
