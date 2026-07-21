@@ -10,14 +10,14 @@ import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v2.1 🍶)
+# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v2.2 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v2.1 - All Orders & Gifts Included)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v2.2 - Gift Text & Trailing Zero Cleaned)")
 st.markdown("---")
 
 # VIP 정상 8자리 특수코드 명부
@@ -156,20 +156,26 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             orig_columns = orders_df.columns.tolist()
             qty_col_name = orig_columns[18]
             
-            col_A_str = orders_df.iloc[:, 0].astype(str).str.strip()
-            col_B_str = orders_df.iloc[:, 1].astype(str).str.strip()
+            # 💡 [핵심 해결] B열(쇼핑몰 주문번호)과 A열에서 '_사은품' 문자열을 로드 즉시 원본 칸에서 완벽 삭제!
+            col_B_name = orig_columns[1]
+            col_A_name = orig_columns[0]
+            orders_df[col_B_name] = orders_df[col_B_name].astype(str).str.replace(r'_사은품.*', '', regex=True).str.strip()
+            orders_df[col_A_name] = orders_df[col_A_name].astype(str).str.replace(r'_사은품.*', '', regex=True).str.strip()
+            
+            col_A_str = orders_df[col_A_name]
+            col_B_str = orders_df[col_B_name]
             pattern = r'\d{6}[a-zA-Z]{2}\d{3}'
             is_type1 = col_A_str.str.contains(pattern, na=False, regex=True)
             orders_df['주문번호'] = np.where(is_type1, col_A_str, col_B_str)
             
-            # 💡 [원본 10번째 열] 세척된 코드로 완벽 덮어쓰기!
+            # 💡 [원본 10번째 열] 제품코드 뒷자리 가짜 0 세척 후 덮어쓰기!
             orig_pcode_col_name = orig_columns[9]
             orders_df[orig_pcode_col_name] = clean_product_code(orders_df.iloc[:, 9])
             orders_df['제품코드'] = orders_df[orig_pcode_col_name]
             
             orders_df['수량'] = pd.to_numeric(orders_df.iloc[:, 18], errors='coerce').fillna(0)
             
-            # 💡 [핵심 해결] _사은품 강제 삭제 로직(gift_mask) 영구 제거! 모든 주문을 배정 대상으로 포함!
+            # 사은품 필터 없이 모든 유효 주문건 완벽 포함!
             orders_df = orders_df[orders_df['제품코드'] != ""].reset_index(drop=True)
             orders_df['_orig_idx'] = orders_df.index
             
