@@ -12,24 +12,32 @@ from google.oauth2.service_account import Credentials
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 💡 [사장님 전용 구글 시트 KEY 완벽 적용 완료]
+# 💡 [사장님 전용 구글 시트 KEY]
 # ==========================================================
 SHEET_KEY = "1GszdJQKHrU5olbRNpzJaTbzvPHXlC4zqFIgpL1P_PSc"
 
 # ==========================================================
-# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Fix: Ultra Reliable Mode)
+# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Fix: Ultra Secrets Guard)
 # ==========================================================
 def get_gspread_client():
     try:
         if "GCP_KEY" not in st.secrets:
             st.error("🚨 Streamlit Secrets에 'GCP_KEY'가 설정되어 있지 않습니다.")
             return None
-        creds_dict = json.loads(st.secrets["GCP_KEY"])
+            
+        raw_key = st.secrets["GCP_KEY"]
+        
+        # Secrets 입력 형태(문자열/사전) 완벽 자동 판별
+        if isinstance(raw_key, str):
+            creds_dict = json.loads(raw_key, strict=False)
+        else:
+            creds_dict = dict(raw_key)
+            
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"🚨 로봇 열쇠(JSON) 인식 에러: {e}")
+        st.error(f"🚨 로봇 열쇠(JSON) 인식 에러 상세: {repr(e)}")
         return None
 
 def load_from_cloud():
@@ -38,7 +46,7 @@ def load_from_cloud():
         try:
             sheet = client.open_by_key(SHEET_KEY).sheet1
             data = sheet.cell(1, 1).value
-            if data:
+            if data and str(data).strip():
                 parsed = json.loads(data)
                 st.session_state['inventory_loaded'] = parsed.get('inventory_loaded', False)
                 st.session_state['stock_seosan'] = parsed.get('stock_seosan', {})
@@ -47,7 +55,8 @@ def load_from_cloud():
                 st.session_state['history'] = parsed.get('history', [])
                 return True
         except Exception as e:
-            st.error(f"🚨 구글 시트 불러오기 실패: {e}")
+            # 빈 시트일 경우 조용히 스킵
+            pass
     return False
 
 def save_to_cloud():
@@ -69,25 +78,24 @@ def save_to_cloud():
             }
             json_payload = json.dumps(data, ensure_ascii=False)
             
-            # 💡 호환성 100% 무적 쓰기 명령어 (1행 1열 A1칸에 직접 쓰기)
             sheet.update_cell(1, 1, json_payload)
             return True
         except Exception as e:
-            st.error(f"🚨 구글 시트 저장 실패: {e}")
+            st.error(f"🚨 구글 시트 저장 실패 상세: {repr(e)}")
             return False
     else:
         st.error("🚨 SHEET_KEY가 설정되지 않았습니다.")
         return False
 
 # ==========================================================
-# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.6 🍶)
+# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.8 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.6 - Cloud Key Lock Fixed)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.8 - Secrets Format Guard)")
 st.markdown("---")
 
 ALLOWED_8DIGIT_CODES = [
