@@ -15,18 +15,17 @@ warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 # 💡 [필수 입력] 사장님의 구글 시트 URL 주소 중 긴 ID값을 여기에 넣으세요!
 # 예: 주소가 https://docs.google.com/spreadsheets/d/1ABC123XYZ/edit 이면 -> "1ABC123XYZ"
 # ==========================================================
-SHEET_KEY = "여기에_구글_시트_고유_ID를_복사해서_붙여넣으세요"
+SHEET_KEY = "1GszdJQKHrU5olbRNpzJaTbzvPHXlC4zqFIgpL1P_PSc"
 
 # ==========================================================
-# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Direct Spreadsheet ID Mode)
+# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Fix: Ultra Reliable Mode)
 # ==========================================================
 def get_gspread_client():
     try:
         if "GCP_KEY" not in st.secrets:
-            st.error("🚨 Streamlit Secrets에 'GCP_KEY'가 없습니다. 세팅을 확인해주세요.")
+            st.error("🚨 Streamlit Secrets에 'GCP_KEY'가 설정되어 있지 않습니다.")
             return None
         creds_dict = json.loads(st.secrets["GCP_KEY"])
-        # 드라이브 검색 없이 오직 시트 직접 접근 권한만 사용!
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         return gspread.authorize(creds)
@@ -36,11 +35,10 @@ def get_gspread_client():
 
 def load_from_cloud():
     client = get_gspread_client()
-    if client and SHEET_KEY != "1GszdJQKHrU5olbRNpzJaTbzvPHXlC4zqFIgpL1P_PSc":
+    if client and SHEET_KEY and SHEET_KEY != "1GszdJQKHrU5olbRNpzJaTbzvPHXlC4zqFIgpL1P_PSc":
         try:
-            # 💡 드라이브 검색을 거치지 않는 다이렉트 직통 연결!
             sheet = client.open_by_key(SHEET_KEY).sheet1
-            data = sheet.acell('A1').value
+            data = sheet.cell(1, 1).value
             if data:
                 parsed = json.loads(data)
                 st.session_state['inventory_loaded'] = parsed.get('inventory_loaded', False)
@@ -50,14 +48,13 @@ def load_from_cloud():
                 st.session_state['history'] = parsed.get('history', [])
                 return True
         except Exception as e:
-            st.error(f"🚨 구글 시트 불러오기 에러: {e}")
+            st.error(f"🚨 구글 시트 불러오기 실패: {e}")
     return False
 
 def save_to_cloud():
     client = get_gspread_client()
-    if client and SHEET_KEY != "여기에_구글_시트_고유_ID를_복사해서_붙여넣으세요":
+    if client and SHEET_KEY and SHEET_KEY != "1GszdJQKHrU5olbRNpzJaTbzvPHXlC4zqFIgpL1P_PSc":
         try:
-            # 💡 드라이브 검색을 거치지 않는 다이렉트 직통 연결!
             sheet = client.open_by_key(SHEET_KEY).sheet1
             
             s_dict = {str(k): int(v) for k, v in st.session_state.get('stock_seosan', {}).items()}
@@ -71,19 +68,27 @@ def save_to_cloud():
                 'history': st.session_state.get('history', []),
                 'last_updated': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
-            sheet.update_acell('A1', json.dumps(data, ensure_ascii=False))
+            json_payload = json.dumps(data, ensure_ascii=False)
+            
+            # 💡 호환성 100% 무적 쓰기 명령어 (1행 1열 A1칸에 직접 쓰기)
+            sheet.update_cell(1, 1, json_payload)
+            return True
         except Exception as e:
-            st.error(f"🚨 구글 시트 저장 에러: {e}")
+            st.error(f"🚨 구글 시트 저장 실패: {e}")
+            return False
+    else:
+        st.error("🚨 SHEET_KEY가 설정되지 않았습니다. app.py 파일 상단의 SHEET_KEY 값을 확인해주세요.")
+        return False
 
 # ==========================================================
-# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.4 🍶)
+# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.5 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.4 - Direct Sheet Key Access)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.5 - Verified Cloud Sync)")
 st.markdown("---")
 
 ALLOWED_8DIGIT_CODES = [
@@ -173,8 +178,12 @@ with st.sidebar:
                 st.session_state['stock_yongma'] = df_y.groupby('제품코드')['재고수량'].sum().to_dict()
                 
                 st.session_state['inventory_loaded'] = True
-                save_to_cloud()
-                st.success("✅ 재고 등록 및 클라우드 동기화 완료!")
+                
+                # 💡 진짜 성공했을 때만 토스트 알림!
+                if save_to_cloud():
+                    st.toast("☁️ 재고 데이터가 클라우드 DB에 무사히 저장되었습니다!", icon="✅")
+                    
+                st.success("✅ 재고 등록 완료!")
                 st.rerun()
             except Exception as e:
                 st.error(f"⚠️ 재고 로딩 에러: {e}")
@@ -324,8 +333,9 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
                 '미배정': df_un['주문번호'].nunique() if not df_un.empty else 0
             })
             
-            save_to_cloud()
-            st.toast("☁️ 변경된 재고량이 클라우드 DB에 자동 저장되었습니다!", icon="💾")
+            # 💡 진짜 저장 성공 시에만 토스트 알림!
+            if save_to_cloud():
+                st.toast("☁️ 변경된 재고량이 클라우드 DB에 무사히 저장되었습니다!", icon="💾")
             
             today_str = datetime.datetime.now().strftime("%m%d")
             order_cnt = st.session_state['order_count']
