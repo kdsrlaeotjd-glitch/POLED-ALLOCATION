@@ -17,7 +17,7 @@ warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 SHEET_KEY = "1EdIjoVA8O7C6eTAierbyHELODO5BS1KoeI9JnAmEBvQ"
 
 # ==========================================================
-# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Fix: Exact Email Inspector)
+# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Fix: X-Ray Raw Error Diagnostic)
 # ==========================================================
 def get_bot_email():
     try:
@@ -85,21 +85,28 @@ def save_to_cloud():
             sheet.update_cell(1, 1, json_payload)
             return True
         except Exception as e:
-            st.error(f"🚨 구글 시트 저장 실패: {repr(e)}")
+            # 💡 [X-Ray 핵심] 구글 서버가 돌려준 원본 응답 메시지 추출
+            raw_response = ""
+            if hasattr(e, 'response') and hasattr(e.response, 'text'):
+                raw_response = f" | 구글 응답 원본: {e.response.text}"
+            elif hasattr(e, 'args'):
+                raw_response = f" | 상세 내용: {e.args}"
+                
+            st.error(f"🚨 구글 서버 차단 원인: {repr(e)}{raw_response}")
             return False
     else:
         st.error("🚨 SHEET_KEY가 설정되지 않았습니다.")
         return False
 
 # ==========================================================
-# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v4.0 🍶)
+# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v4.1 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v4.0 - Bot Inspector Live)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v4.1 - Google X-Ray Inspector)")
 st.markdown("---")
 
 ALLOWED_8DIGIT_CODES = [
@@ -158,10 +165,8 @@ with st.sidebar:
     st.image(SIDEBAR_LOGO_URL, width="stretch")
     st.markdown("---")
     
-    # 💡 [핵심] 화면에 봇 이메일 정확하게 표시!
     bot_email = get_bot_email()
-    st.info(f"🤖 **공유용 봇 이메일 (복사하세요):**\n`{bot_email}`")
-    st.caption("위 이메일을 구글 시트 [공유] -> [편집자]로 등록해야 합니다!")
+    st.info(f"🤖 **공유용 봇 이메일:**\n`{bot_email}`")
     st.markdown("---")
     
     st.header("🏢 1단계: 창고 재고 업로드")
