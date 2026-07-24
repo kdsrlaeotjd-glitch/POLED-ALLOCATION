@@ -12,13 +12,23 @@ from google.oauth2.service_account import Credentials
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 💡 [사장님 개인 계정 전용 구글 시트 KEY 완벽 적용]
+# 💡 [사장님 개인 계정 전용 구글 시트 KEY]
 # ==========================================================
 SHEET_KEY = "1EdIjoVA8O7C6eTAierbyHELODO5BS1KoeI9JnAmEBvQ"
 
 # ==========================================================
-# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Fix: Personal Google Sheet)
+# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Fix: Exact Email Inspector)
 # ==========================================================
+def get_bot_email():
+    try:
+        if "GCP_KEY" in st.secrets:
+            raw_key = st.secrets["GCP_KEY"]
+            creds_dict = json.loads(raw_key, strict=False) if isinstance(raw_key, str) else dict(raw_key)
+            return creds_dict.get("client_email", "이메일 정보 없음")
+    except Exception:
+        pass
+    return "Secrets 설정 오류"
+
 def get_gspread_client():
     try:
         if "GCP_KEY" not in st.secrets:
@@ -26,17 +36,13 @@ def get_gspread_client():
             return None
             
         raw_key = st.secrets["GCP_KEY"]
-        
-        if isinstance(raw_key, str):
-            creds_dict = json.loads(raw_key, strict=False)
-        else:
-            creds_dict = dict(raw_key)
+        creds_dict = json.loads(raw_key, strict=False) if isinstance(raw_key, str) else dict(raw_key)
             
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"🚨 로봇 열쇠(JSON) 인식 에러 상세: {repr(e)}")
+        st.error(f"🚨 로봇 열쇠(JSON) 인식 에러: {repr(e)}")
         return None
 
 def load_from_cloud():
@@ -53,7 +59,7 @@ def load_from_cloud():
                 st.session_state['order_count'] = parsed.get('order_count', 0)
                 st.session_state['history'] = parsed.get('history', [])
                 return True
-        except Exception as e:
+        except Exception:
             pass
     return False
 
@@ -79,21 +85,21 @@ def save_to_cloud():
             sheet.update_cell(1, 1, json_payload)
             return True
         except Exception as e:
-            st.error(f"🚨 구글 시트 저장 실패 상세: {repr(e)}")
+            st.error(f"🚨 구글 시트 저장 실패: {repr(e)}")
             return False
     else:
         st.error("🚨 SHEET_KEY가 설정되지 않았습니다.")
         return False
 
 # ==========================================================
-# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.9 🍶)
+# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v4.0 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.9 - Personal Cloud DB Live)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v4.0 - Bot Inspector Live)")
 st.markdown("---")
 
 ALLOWED_8DIGIT_CODES = [
@@ -151,6 +157,13 @@ if 'inventory_loaded' not in st.session_state:
 with st.sidebar:
     st.image(SIDEBAR_LOGO_URL, width="stretch")
     st.markdown("---")
+    
+    # 💡 [핵심] 화면에 봇 이메일 정확하게 표시!
+    bot_email = get_bot_email()
+    st.info(f"🤖 **공유용 봇 이메일 (복사하세요):**\n`{bot_email}`")
+    st.caption("위 이메일을 구글 시트 [공유] -> [편집자]로 등록해야 합니다!")
+    st.markdown("---")
+    
     st.header("🏢 1단계: 창고 재고 업로드")
     
     is_disabled = st.session_state['inventory_loaded']
