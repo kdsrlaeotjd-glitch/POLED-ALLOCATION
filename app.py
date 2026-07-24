@@ -1,26 +1,81 @@
 import io
 import zipfile
 import datetime
+import json
 import numpy as np
 import pandas as pd
 import streamlit as st
 import warnings
+import gspread
+from google.oauth2.service_account import Credentials
 
-# 엑셀 형식 경고창 출력 방지
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 0. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v2.2 🍶)
+# 0. 클라우드 DB (구글 시트) 통신 로봇 세팅 🤖
+# ==========================================================
+def get_gspread_client():
+    try:
+        creds_dict = json.loads(st.secrets["GCP_KEY"])
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        return gspread.authorize(creds)
+    except Exception as e:
+        return None
+
+def load_from_cloud():
+    client = get_gspread_client()
+    if client:
+        try:
+            sheet = client.open("POLED_WMS_DB").sheet1
+            data = sheet.acell('A1').value
+            if data:
+                parsed = json.loads(data)
+                st.session_state['inventory_loaded'] = parsed.get('inventory_loaded', False)
+                st.session_state['stock_seosan'] = parsed.get('stock_seosan', {})
+                st.session_state['stock_yongma'] = parsed.get('stock_yongma', {})
+                st.session_state['order_count'] = parsed.get('order_count', 0)
+                st.session_state['history'] = parsed.get('history', [])
+                return True
+        except Exception as e:
+            pass
+    return False
+
+def save_to_cloud():
+    client = get_gspread_client()
+    if client:
+        try:
+            sheet = client.open("POLED_WMS_DB").sheet1
+            # 에러 방지를 위해 확실하게 일반 숫자로 변환 (JSON Error Guard)
+            s_dict = {str(k): int(v) for k, v in st.session_state.get('stock_seosan', {}).items()}
+            y_dict = {str(k): int(v) for k, v in st.session_state.get('stock_yongma', {}).items()}
+            
+            data = {
+                'inventory_loaded': st.session_state.get('inventory_loaded', False),
+                'stock_seosan': s_dict,
+                'stock_yongma': y_dict,
+                'order_count': int(st.session_state.get('order_count', 0)),
+                'history': st.session_state.get('history', []),
+                'last_updated': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            sheet.update_acell('A1', json.dumps(data, ensure_ascii=False))
+        except Exception as e:
+            pass
+
+# ==========================================================
+# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.1 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v2.2 - Gift Text & Trailing Zero Cleaned)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.1 - Perfected Cloud & Dual Backup)")
 st.markdown("---")
 
-# VIP 정상 8자리 특수코드 명부
 ALLOWED_8DIGIT_CODES = [
     '10101101', '10101102', '10101105', '10101106', '10101108',
     '10101109', '10101110', '10101111', '10101112', '10101113',
@@ -29,106 +84,118 @@ ALLOWED_8DIGIT_CODES = [
     '10102102', '10102101'
 ]
 
-# 제품코드 초강력 세척 함수 (에러 완벽 방어)
 def clean_product_code(series):
     s = series.fillna("").astype(str).str.strip()
     s = s.str.replace(r'\.0$', '', regex=True)
-    
     def remove_fake_zero(val):
         val_str = str(val).strip()
-        if val_str.endswith('.0'):
-            val_str = val_str[:-2]
-            
-        if val_str == "" or val_str.lower() == "nan":
-            return ""
-            
+        if val_str.endswith('.0'): val_str = val_str[:-2]
+        if val_str == "" or val_str.lower() == "nan": return ""
         if len(val_str) == 8 and val_str not in ALLOWED_8DIGIT_CODES:
-            if val_str[-1] == '0':
-                return val_str[:-1]
+            if val_str[-1] == '0': return val_str[:-1]
         elif len(val_str) == 6:
-            if val_str[-1] == '0':
-                return val_str[:-1]
-                
+            if val_str[-1] == '0': return val_str[:-1]
         return val_str
-        
     return s.apply(remove_fake_zero)
 
-# 단포 / 단수합포 / 이종합포 자동 감지 함수
 def get_pack_stats(df):
-    if df is None or df.empty or '주문번호' not in df.columns:
-        return {'단포': 0, '단수합포': 0, '이종합포': 0}
-    
+    if df is None or df.empty or '주문번호' not in df.columns: return {'단포': 0, '단수합포': 0, '이종합포': 0}
     needed = ['주문번호', '제품코드', '수량']
     for col in needed:
-        if col not in df.columns:
-            return {'단포': 0, '단수합포': 0, '이종합포': 0}
-
+        if col not in df.columns: return {'단포': 0, '단수합포': 0, '이종합포': 0}
     grouped = df.groupby('주문번호')
     stats = {'단포': 0, '단수합포': 0, '이종합포': 0}
     for _, group in grouped:
-        sku_cnt = group['제품코드'].nunique()
-        total_qty = group['수량'].sum()
+        sku_cnt = group['제품코드'].nunique(); total_qty = group['수량'].sum()
         if sku_cnt > 1: stats['이종합포'] += 1
         elif total_qty > 1: stats['단수합포'] += 1
         else: stats['단포'] += 1
     return stats
 
 # ==========================================================
-# 1. 세션 금고(Memory Vault)
+# 2. 세션 금고 & 클라우드 자동 불러오기
 # ==========================================================
 if 'inventory_loaded' not in st.session_state:
     st.session_state['inventory_loaded'] = False
-if 'stock_seosan' not in st.session_state:
     st.session_state['stock_seosan'] = {}
-if 'stock_yongma' not in st.session_state:
     st.session_state['stock_yongma'] = {}
-if 'order_count' not in st.session_state:
     st.session_state['order_count'] = 0
-if 'history' not in st.session_state:
     st.session_state['history'] = []
+    
+    if load_from_cloud():
+        st.toast("☁️ 구글 시트(DB)에서 마지막 작업 상태를 불러왔습니다!", icon="✅")
 
 # ==========================================================
-# 2. 사이드바
+# 3. 사이드바
 # ==========================================================
 with st.sidebar:
     st.image(SIDEBAR_LOGO_URL, width="stretch")
     st.markdown("---")
     st.header("🏢 1단계: 창고 재고 업로드")
+    
     is_disabled = st.session_state['inventory_loaded']
-    file_seosan = st.file_uploader("📂 서산창고 (B, L열)", type=['xlsx', 'xls'], disabled=is_disabled)
-    file_yongma = st.file_uploader("📂 용마창고 (B, H열)", type=['xlsx', 'xls'], disabled=is_disabled)
+    file_seosan = st.file_uploader("📂 서산창고 (원본 or 백업본)", type=['xlsx', 'xls'], disabled=is_disabled)
+    file_yongma = st.file_uploader("📂 용마창고 (원본 or 백업본)", type=['xlsx', 'xls'], disabled=is_disabled)
     
     if st.button("📥 재고 확정", type="primary", disabled=is_disabled):
         if file_seosan and file_yongma:
             try:
-                df_s = pd.read_excel(file_seosan, usecols="B,L", engine='xlrd' if file_seosan.name.endswith('.xls') else None)
-                df_s.columns = ['제품코드', '재고수량']
+                # 서산 로드 (원본 및 백업본 완벽 호환)
+                df_s_check = pd.read_excel(file_seosan, nrows=0, engine='xlrd' if file_seosan.name.endswith('.xls') else None)
+                if '제품코드' in df_s_check.columns and '재고수량' in df_s_check.columns:
+                    df_s = pd.read_excel(file_seosan, usecols=['제품코드', '재고수량'], engine='xlrd' if file_seosan.name.endswith('.xls') else None)
+                else:
+                    df_s = pd.read_excel(file_seosan, usecols="B,L", engine='xlrd' if file_seosan.name.endswith('.xls') else None)
+                    df_s.columns = ['제품코드', '재고수량']
                 df_s['제품코드'] = clean_product_code(df_s['제품코드'])
                 df_s['재고수량'] = pd.to_numeric(df_s['재고수량'], errors='coerce').fillna(0)
                 df_s = df_s[df_s['제품코드'] != ""]
                 st.session_state['stock_seosan'] = df_s.groupby('제품코드')['재고수량'].sum().to_dict()
                 
-                df_y = pd.read_excel(file_yongma, usecols="B,H", engine='xlrd' if file_yongma.name.endswith('.xls') else None)
-                df_y.columns = ['제품코드', '재고수량']
+                # 용마 로드 (원본 및 백업본 완벽 호환)
+                df_y_check = pd.read_excel(file_yongma, nrows=0, engine='xlrd' if file_yongma.name.endswith('.xls') else None)
+                if '제품코드' in df_y_check.columns and '재고수량' in df_y_check.columns:
+                    df_y = pd.read_excel(file_yongma, usecols=['제품코드', '재고수량'], engine='xlrd' if file_yongma.name.endswith('.xls') else None)
+                else:
+                    df_y = pd.read_excel(file_yongma, usecols="B,H", engine='xlrd' if file_yongma.name.endswith('.xls') else None)
+                    df_y.columns = ['제품코드', '재고수량']
                 df_y['제품코드'] = clean_product_code(df_y['제품코드'])
                 df_y['재고수량'] = pd.to_numeric(df_y['재고수량'], errors='coerce').fillna(0)
                 df_y = df_y[df_y['제품코드'] != ""]
                 st.session_state['stock_yongma'] = df_y.groupby('제품코드')['재고수량'].sum().to_dict()
                 
                 st.session_state['inventory_loaded'] = True
-                st.success("✅ 재고 등록 완료!")
+                save_to_cloud()
+                st.success("✅ 재고 등록 및 클라우드 동기화 완료!")
                 st.rerun()
             except Exception as e:
                 st.error(f"⚠️ 재고 로딩 에러: {e}")
-    
+                
+    # 💡 [복구 완료] 구글 시트 마비 시 대비용 수동 엑셀 백업 버튼!
+    if st.session_state['inventory_loaded']:
+        st.markdown("---")
+        st.header("💾 잔여 재고 수동 백업")
+        st.write("클라우드 자동 저장 외에, 불안하시면 엑셀로도 보관해두세요.")
+        
+        df_s_bk = pd.DataFrame(list(st.session_state['stock_seosan'].items()), columns=['제품코드', '재고수량'])
+        df_y_bk = pd.DataFrame(list(st.session_state['stock_yongma'].items()), columns=['제품코드', '재고수량'])
+        
+        bk_zip = io.BytesIO()
+        with zipfile.ZipFile(bk_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+            eb_s = io.BytesIO(); df_s_bk.to_excel(eb_s, index=False); zf.writestr("백업_서산창고.xlsx", eb_s.getvalue())
+            eb_y = io.BytesIO(); df_y_bk.to_excel(eb_y, index=False); zf.writestr("백업_용마창고.xlsx", eb_y.getvalue())
+            
+        st.download_button("💾 이중 백업 (ZIP) 다운로드", bk_zip.getvalue(), f"잔여재고_수동백업_{datetime.datetime.now().strftime('%m%d_%H%M')}.zip", "application/zip", type="secondary")
+
     st.markdown("---")
     if st.button("🚨 당일 마감 & 초기화", type="secondary"):
         st.session_state.clear()
-        st.success("🔄 초기화되었습니다.")
+        save_to_cloud()
+        st.success("🔄 초기화 및 클라우드 청소 완료.")
         st.rerun()
 
 # ==========================================================
-# 3. 메인 화면
+# 4. 메인 화면
 # ==========================================================
 c1, c2 = st.columns(2)
 c1.info(f"🍶 **서산 잔여 품목:** {len(st.session_state['stock_seosan'])}개")
@@ -147,35 +214,30 @@ file_order = st.file_uploader(f"📑 발주서 ({st.session_state['order_count']
 if file_order and st.button("🚀 자동 분배 실행", type="primary"):
     try:
         with st.spinner("배정 로직 가동 중..."):
-            try:
-                orders_df = pd.read_excel(file_order, engine='xlrd' if file_order.name.endswith('.xls') else None)
-            except:
-                orders_df = pd.read_excel(file_order)
+            try: orders_df = pd.read_excel(file_order, engine='xlrd' if file_order.name.endswith('.xls') else None)
+            except: orders_df = pd.read_excel(file_order)
 
             orders_df.columns = orders_df.columns.str.strip()
             orig_columns = orders_df.columns.tolist()
             qty_col_name = orig_columns[18]
             
-            # 💡 [핵심 해결] B열(쇼핑몰 주문번호)과 A열에서 '_사은품' 문자열을 로드 즉시 원본 칸에서 완벽 삭제!
-            col_B_name = orig_columns[1]
-            col_A_name = orig_columns[0]
+            # [기능 유지] A/B열 사은품 글자 세척 (ERP 업로드 에러 방지)
+            col_B_name = orig_columns[1]; col_A_name = orig_columns[0]
             orders_df[col_B_name] = orders_df[col_B_name].astype(str).str.replace(r'_사은품.*', '', regex=True).str.strip()
             orders_df[col_A_name] = orders_df[col_A_name].astype(str).str.replace(r'_사은품.*', '', regex=True).str.strip()
             
-            col_A_str = orders_df[col_A_name]
-            col_B_str = orders_df[col_B_name]
+            col_A_str = orders_df[col_A_name]; col_B_str = orders_df[col_B_name]
             pattern = r'\d{6}[a-zA-Z]{2}\d{3}'
             is_type1 = col_A_str.str.contains(pattern, na=False, regex=True)
             orders_df['주문번호'] = np.where(is_type1, col_A_str, col_B_str)
             
-            # 💡 [원본 10번째 열] 제품코드 뒷자리 가짜 0 세척 후 덮어쓰기!
+            # [기능 유지] 원본 10번째 열 덮어쓰기 (가짜 0 세척)
             orig_pcode_col_name = orig_columns[9]
             orders_df[orig_pcode_col_name] = clean_product_code(orders_df.iloc[:, 9])
             orders_df['제품코드'] = orders_df[orig_pcode_col_name]
-            
             orders_df['수량'] = pd.to_numeric(orders_df.iloc[:, 18], errors='coerce').fillna(0)
             
-            # 사은품 필터 없이 모든 유효 주문건 완벽 포함!
+            # [기능 유지] 사은품 필터 완전 제거
             orders_df = orders_df[orders_df['제품코드'] != ""].reset_index(drop=True)
             orders_df['_orig_idx'] = orders_df.index
             
@@ -231,11 +293,8 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
                         total_required = reqs[pc]
                         total_avail = temp_s.get(pc, 0) + temp_y.get(pc, 0)
                         
-                        if total_required > total_avail:
-                            reason_str = '실재고부족'
-                        else:
-                            reason_str = '합배송품절'
-                            
+                        if total_required > total_avail: reason_str = '실재고부족'
+                        else: reason_str = '합배송품절'
                         results_map[idx] = {'주문번호': oid, '제품코드': it['제품코드'], '수량': it['수량'], '서산배정': 0, '용마배정': 0, '상태': reason_str}
             
             results_list = [results_map[i] for i in range(len(orders_df))]
@@ -266,6 +325,10 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
                 '미배정': df_un['주문번호'].nunique() if not df_un.empty else 0
             })
             
+            save_to_cloud()
+            st.toast("☁️ 변경된 재고량이 클라우드 DB에 자동 저장되었습니다!", icon="💾")
+            
+            # [기능 유지] 파일명 스마트 관리
             today_str = datetime.datetime.now().strftime("%m%d")
             order_cnt = st.session_state['order_count']
             
@@ -294,7 +357,6 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
     except Exception as e:
         st.error(f"🚨 배정 중 중단됨: {e}")
 
-# 누적 히스토리
 if st.session_state['history']:
     st.markdown("---")
     st.subheader("📈 누적 배정 히스토리")
