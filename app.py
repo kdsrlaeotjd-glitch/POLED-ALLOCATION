@@ -6,76 +6,75 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import warnings
+import urllib.request
+import urllib.parse
 
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 0. 스트림릿 공식 구글 시트 커넥터 세팅 🤖 (Official Connector v5.0)
+# 0. 구글 시트 통신 로봇 세팅 🤖 (Fix: Web API Direct Protocol)
 # ==========================================================
-from streamlit_gsheets import GSheetsConnection
-
-def get_gsheets_conn():
-    try:
-        return st.connection("gsheets", type=GSheetsConnection)
-    except Exception as e:
-        st.error(f"🚨 구글 연동 실패: {e}")
-        return None
-
 def load_from_cloud():
-    conn = get_gsheets_conn()
-    if conn:
-        try:
-            df = conn.read(ttl=0)
-            if not df.empty and 'A1' in df.columns or len(df) > 0:
-                # 첫 번째 셀 데이터 추출
-                raw_val = df.iloc[0, 0] if not df.empty else None
-                if raw_val and str(raw_val).strip():
-                    parsed = json.loads(str(raw_val))
-                    st.session_state['inventory_loaded'] = parsed.get('inventory_loaded', False)
-                    st.session_state['stock_seosan'] = parsed.get('stock_seosan', {})
-                    st.session_state['stock_yongma'] = parsed.get('stock_yongma', {})
-                    st.session_state['order_count'] = parsed.get('order_count', 0)
-                    st.session_state['history'] = parsed.get('history', [])
-                    return True
-        except Exception:
-            pass
+    try:
+        if "WEB_APP_URL" not in st.secrets:
+            return False
+        url = st.secrets["WEB_APP_URL"]
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = response.read().decode('utf-8')
+            if data and data.strip():
+                parsed = json.loads(data)
+                st.session_state['inventory_loaded'] = parsed.get('inventory_loaded', False)
+                st.session_state['stock_seosan'] = parsed.get('stock_seosan', {})
+                st.session_state['stock_yongma'] = parsed.get('stock_yongma', {})
+                st.session_state['order_count'] = parsed.get('order_count', 0)
+                st.session_state['history'] = parsed.get('history', [])
+                return True
+    except Exception:
+        pass
     return False
 
 def save_to_cloud():
-    conn = get_gsheets_conn()
-    if conn:
-        try:
-            s_dict = {str(k): int(v) for k, v in st.session_state.get('stock_seosan', {}).items()}
-            y_dict = {str(k): int(v) for k, v in st.session_state.get('stock_yongma', {}).items()}
-            
-            data = {
-                'inventory_loaded': st.session_state.get('inventory_loaded', False),
-                'stock_seosan': s_dict,
-                'stock_yongma': y_dict,
-                'order_count': int(st.session_state.get('order_count', 0)),
-                'history': st.session_state.get('history', []),
-                'last_updated': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            json_payload = json.dumps(data, ensure_ascii=False)
-            
-            # 단일 셀 데이터프레임 생성 후 저장
-            df_to_save = pd.DataFrame([{"DB_DATA": json_payload}])
-            conn.update(data=df_to_save)
-            return True
-        except Exception as e:
-            st.error(f"🚨 구글 시트 저장 실패: {e}")
+    try:
+        if "WEB_APP_URL" not in st.secrets:
+            st.error("🚨 Streamlit Secrets에 'WEB_APP_URL'이 설정되어 있지 않습니다.")
             return False
-    return False
+            
+        url = st.secrets["WEB_APP_URL"]
+        s_dict = {str(k): int(v) for k, v in st.session_state.get('stock_seosan', {}).items()}
+        y_dict = {str(k): int(v) for k, v in st.session_state.get('stock_yongma', {}).items()}
+        
+        data = {
+            'inventory_loaded': st.session_state.get('inventory_loaded', False),
+            'stock_seosan': s_dict,
+            'stock_yongma': y_dict,
+            'order_count': int(st.session_state.get('order_count', 0)),
+            'history': st.session_state.get('history', []),
+            'last_updated': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        json_payload = json.dumps(data, ensure_ascii=False).encode('utf-8')
+        
+        req = urllib.request.Request(url, data=json_payload, headers={'Content-Type': 'text/plain;charset=utf-8'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            res_text = response.read().decode('utf-8')
+            if "SUCCESS" in res_text:
+                return True
+            else:
+                st.error(f"🚨 구글 시트 저장 서버 응답: {res_text}")
+                return False
+    except Exception as e:
+        st.error(f"🚨 구글 시트 저장 실패: {repr(e)}")
+        return False
 
 # ==========================================================
-# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v5.0 🍶)
+# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v6.0 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v5.0 - Streamlit Official GSheets)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v6.0 - Web API Direct Connection)")
 st.markdown("---")
 
 ALLOWED_8DIGIT_CODES = [
