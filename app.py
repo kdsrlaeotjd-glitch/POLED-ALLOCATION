@@ -12,12 +12,12 @@ from google.oauth2.service_account import Credentials
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 💡 [사장님 전용 구글 시트 KEY]
+# 💡 [사장님 개인 계정 전용 구글 시트 KEY 완벽 적용]
 # ==========================================================
-SHEET_KEY = "1GszdJQKHrU5olbRNpzJaTbzvPHXlC4zqFIgpL1P_PSc"
+SHEET_KEY = "1EdIjoVA8O7C6eTAierbyHELODO5BS1KoeI9JnAmEBvQ"
 
 # ==========================================================
-# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Fix: Ultra Secrets Guard)
+# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Fix: Personal Google Sheet)
 # ==========================================================
 def get_gspread_client():
     try:
@@ -27,7 +27,6 @@ def get_gspread_client():
             
         raw_key = st.secrets["GCP_KEY"]
         
-        # Secrets 입력 형태(문자열/사전) 완벽 자동 판별
         if isinstance(raw_key, str):
             creds_dict = json.loads(raw_key, strict=False)
         else:
@@ -55,7 +54,6 @@ def load_from_cloud():
                 st.session_state['history'] = parsed.get('history', [])
                 return True
         except Exception as e:
-            # 빈 시트일 경우 조용히 스킵
             pass
     return False
 
@@ -88,14 +86,14 @@ def save_to_cloud():
         return False
 
 # ==========================================================
-# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.8 🍶)
+# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.9 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.8 - Secrets Format Guard)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.9 - Personal Cloud DB Live)")
 st.markdown("---")
 
 ALLOWED_8DIGIT_CODES = [
