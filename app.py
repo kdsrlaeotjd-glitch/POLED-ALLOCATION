@@ -12,8 +12,7 @@ from google.oauth2.service_account import Credentials
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 💡 [필수 입력] 사장님의 구글 시트 URL 주소 중 긴 ID값을 여기에 넣으세요!
-# 예: 주소가 https://docs.google.com/spreadsheets/d/1ABC123XYZ/edit 이면 -> "1ABC123XYZ"
+# 💡 [사장님 전용 구글 시트 KEY 완벽 적용 완료]
 # ==========================================================
 SHEET_KEY = "1GszdJQKHrU5olbRNpzJaTbzvPHXlC4zqFIgpL1P_PSc"
 
@@ -35,7 +34,7 @@ def get_gspread_client():
 
 def load_from_cloud():
     client = get_gspread_client()
-    if client and SHEET_KEY and SHEET_KEY != "1GszdJQKHrU5olbRNpzJaTbzvPHXlC4zqFIgpL1P_PSc":
+    if client and SHEET_KEY:
         try:
             sheet = client.open_by_key(SHEET_KEY).sheet1
             data = sheet.cell(1, 1).value
@@ -53,7 +52,7 @@ def load_from_cloud():
 
 def save_to_cloud():
     client = get_gspread_client()
-    if client and SHEET_KEY and SHEET_KEY != "1GszdJQKHrU5olbRNpzJaTbzvPHXlC4zqFIgpL1P_PSc":
+    if client and SHEET_KEY:
         try:
             sheet = client.open_by_key(SHEET_KEY).sheet1
             
@@ -77,18 +76,18 @@ def save_to_cloud():
             st.error(f"🚨 구글 시트 저장 실패: {e}")
             return False
     else:
-        st.error("🚨 SHEET_KEY가 설정되지 않았습니다. app.py 파일 상단의 SHEET_KEY 값을 확인해주세요.")
+        st.error("🚨 SHEET_KEY가 설정되지 않았습니다.")
         return False
 
 # ==========================================================
-# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.5 🍶)
+# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.6 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.5 - Verified Cloud Sync)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.6 - Cloud Key Lock Fixed)")
 st.markdown("---")
 
 ALLOWED_8DIGIT_CODES = [
@@ -179,7 +178,6 @@ with st.sidebar:
                 
                 st.session_state['inventory_loaded'] = True
                 
-                # 💡 진짜 성공했을 때만 토스트 알림!
                 if save_to_cloud():
                     st.toast("☁️ 재고 데이터가 클라우드 DB에 무사히 저장되었습니다!", icon="✅")
                     
@@ -333,7 +331,6 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
                 '미배정': df_un['주문번호'].nunique() if not df_un.empty else 0
             })
             
-            # 💡 진짜 저장 성공 시에만 토스트 알림!
             if save_to_cloud():
                 st.toast("☁️ 변경된 재고량이 클라우드 DB에 무사히 저장되었습니다!", icon="💾")
             
