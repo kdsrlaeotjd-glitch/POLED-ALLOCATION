@@ -12,7 +12,13 @@ from google.oauth2.service_account import Credentials
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 0. 클라우드 DB (구글 시트) 통신 로봇 세팅 🤖 (에러 탐지 탑재)
+# 💡 [필수 입력] 사장님의 구글 시트 URL 주소 중 긴 ID값을 여기에 넣으세요!
+# 예: 주소가 https://docs.google.com/spreadsheets/d/1ABC123XYZ/edit 이면 -> "1ABC123XYZ"
+# ==========================================================
+SHEET_KEY = "여기에_구글_시트_고유_ID를_복사해서_붙여넣으세요"
+
+# ==========================================================
+# 0. 클라우드 DB 통신 로봇 세팅 🤖 (Direct Spreadsheet ID Mode)
 # ==========================================================
 def get_gspread_client():
     try:
@@ -20,10 +26,8 @@ def get_gspread_client():
             st.error("🚨 Streamlit Secrets에 'GCP_KEY'가 없습니다. 세팅을 확인해주세요.")
             return None
         creds_dict = json.loads(st.secrets["GCP_KEY"])
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
+        # 드라이브 검색 없이 오직 시트 직접 접근 권한만 사용!
+        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         return gspread.authorize(creds)
     except Exception as e:
@@ -32,10 +36,10 @@ def get_gspread_client():
 
 def load_from_cloud():
     client = get_gspread_client()
-    if client:
+    if client and SHEET_KEY != "1GszdJQKHrU5olbRNpzJaTbzvPHXlC4zqFIgpL1P_PSc":
         try:
-            # 💡 [수정 완료] 사장님의 실제 구글 시트 이름으로 내비게이션 변경!
-            sheet = client.open("poled_allocation_DB").sheet1
+            # 💡 드라이브 검색을 거치지 않는 다이렉트 직통 연결!
+            sheet = client.open_by_key(SHEET_KEY).sheet1
             data = sheet.acell('A1').value
             if data:
                 parsed = json.loads(data)
@@ -45,18 +49,16 @@ def load_from_cloud():
                 st.session_state['order_count'] = parsed.get('order_count', 0)
                 st.session_state['history'] = parsed.get('history', [])
                 return True
-        except gspread.exceptions.SpreadsheetNotFound:
-            st.error("🚨 'poled_allocation_DB' 시트를 찾을 수 없습니다. (공유 권한 또는 이름을 확인하세요)")
         except Exception as e:
             st.error(f"🚨 구글 시트 불러오기 에러: {e}")
     return False
 
 def save_to_cloud():
     client = get_gspread_client()
-    if client:
+    if client and SHEET_KEY != "여기에_구글_시트_고유_ID를_복사해서_붙여넣으세요":
         try:
-            # 💡 [수정 완료] 사장님의 실제 구글 시트 이름으로 내비게이션 변경!
-            sheet = client.open("poled_allocation_DB").sheet1
+            # 💡 드라이브 검색을 거치지 않는 다이렉트 직통 연결!
+            sheet = client.open_by_key(SHEET_KEY).sheet1
             
             s_dict = {str(k): int(v) for k, v in st.session_state.get('stock_seosan', {}).items()}
             y_dict = {str(k): int(v) for k, v in st.session_state.get('stock_yongma', {}).items()}
@@ -70,20 +72,18 @@ def save_to_cloud():
                 'last_updated': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             sheet.update_acell('A1', json.dumps(data, ensure_ascii=False))
-        except gspread.exceptions.SpreadsheetNotFound:
-            st.error("🚨 'poled_allocation_DB' 시트를 찾을 수 없습니다. (JSON 열쇠 이메일이 시트에 [편집자]로 공유되었는지 확인하세요!)")
         except Exception as e:
             st.error(f"🚨 구글 시트 저장 에러: {e}")
 
 # ==========================================================
-# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.3 🍶)
+# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v3.4 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.3 - Cloud DB Nav Fixed)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v3.4 - Direct Sheet Key Access)")
 st.markdown("---")
 
 ALLOWED_8DIGIT_CODES = [
@@ -150,7 +150,6 @@ with st.sidebar:
     if st.button("📥 재고 확정", type="primary", disabled=is_disabled):
         if file_seosan and file_yongma:
             try:
-                # 서산 로드 (원본/백업 호환)
                 df_s_check = pd.read_excel(file_seosan, nrows=0, engine='xlrd' if file_seosan.name.endswith('.xls') else None)
                 if '제품코드' in df_s_check.columns and '재고수량' in df_s_check.columns:
                     df_s = pd.read_excel(file_seosan, usecols=['제품코드', '재고수량'], engine='xlrd' if file_seosan.name.endswith('.xls') else None)
@@ -162,7 +161,6 @@ with st.sidebar:
                 df_s = df_s[df_s['제품코드'] != ""]
                 st.session_state['stock_seosan'] = df_s.groupby('제품코드')['재고수량'].sum().to_dict()
                 
-                # 용마 로드 (원본/백업 호환)
                 df_y_check = pd.read_excel(file_yongma, nrows=0, engine='xlrd' if file_yongma.name.endswith('.xls') else None)
                 if '제품코드' in df_y_check.columns and '재고수량' in df_y_check.columns:
                     df_y = pd.read_excel(file_yongma, usecols=['제품코드', '재고수량'], engine='xlrd' if file_yongma.name.endswith('.xls') else None)
@@ -184,16 +182,12 @@ with st.sidebar:
     if st.session_state['inventory_loaded']:
         st.markdown("---")
         st.header("💾 잔여 재고 수동 백업")
-        st.write("클라우드 자동 저장 외에, 불안하시면 엑셀로도 보관해두세요.")
-        
         df_s_bk = pd.DataFrame(list(st.session_state['stock_seosan'].items()), columns=['제품코드', '재고수량'])
         df_y_bk = pd.DataFrame(list(st.session_state['stock_yongma'].items()), columns=['제품코드', '재고수량'])
-        
         bk_zip = io.BytesIO()
         with zipfile.ZipFile(bk_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
             eb_s = io.BytesIO(); df_s_bk.to_excel(eb_s, index=False); zf.writestr("백업_서산창고.xlsx", eb_s.getvalue())
             eb_y = io.BytesIO(); df_y_bk.to_excel(eb_y, index=False); zf.writestr("백업_용마창고.xlsx", eb_y.getvalue())
-            
         st.download_button("💾 이중 백업 (ZIP) 다운로드", bk_zip.getvalue(), f"잔여재고_수동백업_{datetime.datetime.now().strftime('%m%d_%H%M')}.zip", "application/zip", type="secondary")
 
     st.markdown("---")
@@ -230,7 +224,6 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             orig_columns = orders_df.columns.tolist()
             qty_col_name = orig_columns[18]
             
-            # A/B열 사은품 글자 세척
             col_B_name = orig_columns[1]; col_A_name = orig_columns[0]
             orders_df[col_B_name] = orders_df[col_B_name].astype(str).str.replace(r'_사은품.*', '', regex=True).str.strip()
             orders_df[col_A_name] = orders_df[col_A_name].astype(str).str.replace(r'_사은품.*', '', regex=True).str.strip()
@@ -240,13 +233,11 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             is_type1 = col_A_str.str.contains(pattern, na=False, regex=True)
             orders_df['주문번호'] = np.where(is_type1, col_A_str, col_B_str)
             
-            # 원본 10번째 열 덮어쓰기
             orig_pcode_col_name = orig_columns[9]
             orders_df[orig_pcode_col_name] = clean_product_code(orders_df.iloc[:, 9])
             orders_df['제품코드'] = orders_df[orig_pcode_col_name]
             orders_df['수량'] = pd.to_numeric(orders_df.iloc[:, 18], errors='coerce').fillna(0)
             
-            # 유효 데이터만 필터
             orders_df = orders_df[orders_df['제품코드'] != ""].reset_index(drop=True)
             orders_df['_orig_idx'] = orders_df.index
             
