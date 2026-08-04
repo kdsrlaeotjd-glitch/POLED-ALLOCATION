@@ -8,11 +8,12 @@ import streamlit as st
 import warnings
 import urllib.request
 import urllib.parse
+import xlwt  # 💡 팝업창 없는 진짜 엑셀 생성 기계
 
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 0. 구글 시트 통신 및 .xls 파일 생성 엔진 🤖 (v6.1)
+# 0. 구글 시트 통신 및 진짜 .xls 파일 수동 생성 엔진 🤖
 # ==========================================================
 def load_from_cloud():
     try:
@@ -37,7 +38,6 @@ def load_from_cloud():
 def save_to_cloud():
     try:
         if "WEB_APP_URL" not in st.secrets:
-            st.error("🚨 Streamlit Secrets에 'WEB_APP_URL'이 설정되어 있지 않습니다.")
             return False
             
         url = st.secrets["WEB_APP_URL"]
@@ -60,59 +60,39 @@ def save_to_cloud():
             if "SUCCESS" in res_text:
                 return True
             else:
-                st.error(f"🚨 구글 시트 저장 서버 응답: {res_text}")
                 return False
-    except Exception as e:
-        st.error(f"🚨 구글 시트 저장 실패: {repr(e)}")
+    except Exception:
         return False
 
+# 💡 [핵심] 라이브 서버에도 적용된 오리지널 구형 엑셀 파일 생성 기능!
 def df_to_xls_bytes(df):
-    """DataFrame을 WMS 및 MS Excel 호환 .xls 바이너리 스트림으로 변환"""
-    xml_str = '<?xml version="1.0" encoding="utf-8"?>\n'
-    xml_str += '<?mso-application progid="Excel.Sheet"?>\n'
-    xml_str += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n'
-    xml_str += ' xmlns:o="urn:schemas-microsoft-com:office:office"\n'
-    xml_str += ' xmlns:x="urn:schemas-microsoft-com:office:excel"\n'
-    xml_str += ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n'
-    xml_str += ' <Worksheet ss:Name="Sheet1">\n'
-    xml_str += '  <Table>\n'
+    wb = xlwt.Workbook(encoding='utf-8')
+    ws = wb.add_sheet('Sheet1')
     
-    xml_str += '   <Row>\n'
-    for col in df.columns:
-        clean_col = str(col).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        xml_str += f'    <Cell><Data ss:Type="String">{clean_col}</Data></Cell>\n'
-    xml_str += '   </Row>\n'
-    
-    for _, row in df.iterrows():
-        xml_str += '   <Row>\n'
-        for val in row:
-            if pd.isna(val) or val is None:
-                cell_str = ''
-                cell_type = 'String'
-            elif isinstance(val, (int, float, np.integer, np.floating)):
-                cell_str = str(val)
-                cell_type = 'Number'
-            else:
-                cell_str = str(val).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                cell_type = 'String'
-            xml_str += f'    <Cell><Data ss:Type="{cell_type}">{cell_str}</Data></Cell>\n'
-        xml_str += '   </Row>\n'
+    for col_idx, col_name in enumerate(df.columns):
+        ws.write(0, col_idx, str(col_name))
         
-    xml_str += '  </Table>\n'
-    xml_str += ' </Worksheet>\n'
-    xml_str += '</Workbook>'
-    
-    return xml_str.encode('utf-8')
+    for row_idx, row in enumerate(df.itertuples(index=False)):
+        for col_idx, val in enumerate(row):
+            if pd.isna(val) or val == "":
+                ws.write(row_idx + 1, col_idx, "")
+            elif isinstance(val, (int, float, np.integer, np.floating)):
+                ws.write(row_idx + 1, col_idx, val)
+            else:
+                ws.write(row_idx + 1, col_idx, str(val))
+                
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 # ==========================================================
-# 1. Web UI 구성 및 기본 세팅 (v6.1 - XLS Export Edition 🍶)
+# 1. Web UI 구성 및 기본 세팅 
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
-
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v6.1 - XLS Output Enabled)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v6.3 - Live Server Stable Edition)")
 st.markdown("---")
 
 ALLOWED_8DIGIT_CODES = [
@@ -165,7 +145,7 @@ if 'inventory_loaded' not in st.session_state:
         st.toast("☁️ 구글 시트(DB)에서 마지막 작업 상태를 불러왔습니다!", icon="✅")
 
 # ==========================================================
-# 3. 사이드바
+# 3. 사이드바 
 # ==========================================================
 with st.sidebar:
     st.image(SIDEBAR_LOGO_URL, width="stretch")
@@ -362,7 +342,6 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             today_str = datetime.datetime.now().strftime("%m%d")
             order_cnt = st.session_state['order_count']
             
-            # 💡 [.xls 확장자 적용 완료]
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for fn_label, dfd in [
