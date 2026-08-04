@@ -12,7 +12,7 @@ import urllib.parse
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # ==========================================================
-# 0. 구글 시트 통신 로봇 세팅 🤖 (Fix: Web API Direct Protocol)
+# 0. 구글 시트 통신 및 .xls 파일 생성 엔진 🤖 (v6.1)
 # ==========================================================
 def load_from_cloud():
     try:
@@ -66,15 +66,53 @@ def save_to_cloud():
         st.error(f"🚨 구글 시트 저장 실패: {repr(e)}")
         return False
 
+def df_to_xls_bytes(df):
+    """DataFrame을 WMS 및 MS Excel 호환 .xls 바이너리 스트림으로 변환"""
+    xml_str = '<?xml version="1.0" encoding="utf-8"?>\n'
+    xml_str += '<?mso-application progid="Excel.Sheet"?>\n'
+    xml_str += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n'
+    xml_str += ' xmlns:o="urn:schemas-microsoft-com:office:office"\n'
+    xml_str += ' xmlns:x="urn:schemas-microsoft-com:office:excel"\n'
+    xml_str += ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n'
+    xml_str += ' <Worksheet ss:Name="Sheet1">\n'
+    xml_str += '  <Table>\n'
+    
+    xml_str += '   <Row>\n'
+    for col in df.columns:
+        clean_col = str(col).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        xml_str += f'    <Cell><Data ss:Type="String">{clean_col}</Data></Cell>\n'
+    xml_str += '   </Row>\n'
+    
+    for _, row in df.iterrows():
+        xml_str += '   <Row>\n'
+        for val in row:
+            if pd.isna(val) or val is None:
+                cell_str = ''
+                cell_type = 'String'
+            elif isinstance(val, (int, float, np.integer, np.floating)):
+                cell_str = str(val)
+                cell_type = 'Number'
+            else:
+                cell_str = str(val).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                cell_type = 'String'
+            xml_str += f'    <Cell><Data ss:Type="{cell_type}">{cell_str}</Data></Cell>\n'
+        xml_str += '   </Row>\n'
+        
+    xml_str += '  </Table>\n'
+    xml_str += ' </Worksheet>\n'
+    xml_str += '</Workbook>'
+    
+    return xml_str.encode('utf-8')
+
 # ==========================================================
-# 1. Web UI 구성 및 기본 세팅 (무적 배정 엔진 v6.0 🍶)
+# 1. Web UI 구성 및 기본 세팅 (v6.1 - XLS Export Edition 🍶)
 # ==========================================================
 st.set_page_config(page_title="폴레드 주문분배 시스템", page_icon="🍶", layout="wide")
 
 SIDEBAR_LOGO_URL = "https://cdn-pro-web-223-233.cdn-nhncommerce.com/poled0304_godomall_com/data/skin/front/db_poled_C/img/dimg/about_logo02.png"
 
 st.title("🍶 MADE BY DS ")
-st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v6.0 - Web API Direct Connection)")
+st.caption("Seosan & Yongma Multi-Warehouse Allocation Engine (v6.1 - XLS Output Enabled)")
 st.markdown("---")
 
 ALLOWED_8DIGIT_CODES = [
@@ -135,8 +173,8 @@ with st.sidebar:
     st.header("🏢 1단계: 창고 재고 업로드")
     
     is_disabled = st.session_state['inventory_loaded']
-    file_seosan = st.file_uploader("📂 서산창고 (원본/백업본)", type=['xlsx', 'xls'], disabled=is_disabled)
-    file_yongma = st.file_uploader("📂 용마창고 (원본/백업본)", type=['xlsx', 'xls'], disabled=is_disabled)
+    file_seosan = st.file_uploader("📂 서산창고 (.xlsx, .xls 가능)", type=['xlsx', 'xls'], disabled=is_disabled)
+    file_yongma = st.file_uploader("📂 용마창고 (.xlsx, .xls 가능)", type=['xlsx', 'xls'], disabled=is_disabled)
     
     if st.button("📥 재고 확정", type="primary", disabled=is_disabled):
         if file_seosan and file_yongma:
@@ -180,8 +218,8 @@ with st.sidebar:
         df_y_bk = pd.DataFrame(list(st.session_state['stock_yongma'].items()), columns=['제품코드', '재고수량'])
         bk_zip = io.BytesIO()
         with zipfile.ZipFile(bk_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
-            eb_s = io.BytesIO(); df_s_bk.to_excel(eb_s, index=False); zf.writestr("백업_서산창고.xlsx", eb_s.getvalue())
-            eb_y = io.BytesIO(); df_y_bk.to_excel(eb_y, index=False); zf.writestr("백업_용마창고.xlsx", eb_y.getvalue())
+            zf.writestr("백업_서산창고.xls", df_to_xls_bytes(df_s_bk))
+            zf.writestr("백업_용마창고.xls", df_to_xls_bytes(df_y_bk))
         st.download_button("💾 이중 백업 (ZIP) 다운로드", bk_zip.getvalue(), f"잔여재고_수동백업_{datetime.datetime.now().strftime('%m%d_%H%M')}.zip", "application/zip", type="secondary")
 
     st.markdown("---")
@@ -206,7 +244,7 @@ st.header("📋 2단계: 발주서 분배 (연속 차감)")
 priority_choice = st.radio("🍶 **우선 순위:**", ('서산창고 우선', '용마창고 우선'), horizontal=True)
 priority_str = '서산' if '서산' in priority_choice else '용마'
 
-file_order = st.file_uploader(f"📑 발주서 ({st.session_state['order_count']+1}차)", type=['xlsx', 'xls'])
+file_order = st.file_uploader(f"📑 발주서 ({st.session_state['order_count']+1}차 - .xlsx, .xls 가능)", type=['xlsx', 'xls'])
 
 if file_order and st.button("🚀 자동 분배 실행", type="primary"):
     try:
@@ -324,17 +362,16 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             today_str = datetime.datetime.now().strftime("%m%d")
             order_cnt = st.session_state['order_count']
             
+            # 💡 [.xls 확장자 적용 완료]
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for fn_label, dfd in [
-                    (f"{today_str}_{order_cnt}차 서산.xlsx", df_s[orig_columns] if not df_s.empty else df_s), 
-                    (f"{today_str}_{order_cnt}차 용마.xlsx", df_y[orig_columns] if not df_y.empty else df_y), 
-                    (f"{today_str}_{order_cnt}차 미배정.xlsx", df_un), 
-                    (f"{today_str}_{order_cnt}차 모니터링.xlsx", pd.DataFrame(results_list))
+                    (f"{today_str}_{order_cnt}차 서산.xls", df_s[orig_columns] if not df_s.empty else df_s), 
+                    (f"{today_str}_{order_cnt}차 용마.xls", df_y[orig_columns] if not df_y.empty else df_y), 
+                    (f"{today_str}_{order_cnt}차 미배정.xls", df_un), 
+                    (f"{today_str}_{order_cnt}차 모니터링.xls", pd.DataFrame(results_list))
                 ]:
-                    eb = io.BytesIO()
-                    dfd.to_excel(eb, index=False)
-                    zf.writestr(fn_label, eb.getvalue())
+                    zf.writestr(fn_label, df_to_xls_bytes(dfd))
             
             st.success(f"🎉 {st.session_state['order_count']}차 배정 완료!")
             
@@ -345,7 +382,7 @@ if file_order and st.button("🚀 자동 분배 실행", type="primary"):
             with rc3: st.write("**🏢 용마**"); st.write(f"단포: `{y_stats['단포']}` / 단수: `{y_stats['단수합포']}` / 이종: `{y_stats['이종합포']}`")
             
             zip_filename = f"{today_str}_{order_cnt}차.zip"
-            st.download_button("💾 통합 다운로드", zip_buffer.getvalue(), zip_filename, "application/zip", width="stretch")
+            st.download_button("💾 통합 다운로드 (.xls 묶음)", zip_buffer.getvalue(), zip_filename, "application/zip", width="stretch")
     except Exception as e:
         st.error(f"🚨 배정 중 중단됨: {e}")
 
