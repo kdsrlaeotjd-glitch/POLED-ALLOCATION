@@ -5,3 +5,4 @@ openpyxl
 xlrd
 gspread
 google-auth
+xlwt
